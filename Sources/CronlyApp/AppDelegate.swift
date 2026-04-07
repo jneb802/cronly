@@ -1,7 +1,7 @@
 import AppKit
 import CronlyKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var configWatcher: DispatchSourceFileSystemObject?
     private let store = ConfigStore()
@@ -22,6 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         rebuildMenu()
         watchConfigFile()
+    }
+
+    // Rebuild menu every time it opens so running state is fresh
+    func menuWillOpen(_ menu: NSMenu) {
+        rebuildMenu()
     }
 
     private func rebuildMenu() {
@@ -73,28 +78,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
+        menu.delegate = self
         statusItem.menu = menu
     }
 
     private func addTaskItem(menu: NSMenu, task: TaskConfig) {
-        // Status indicator + name
-        let lastExit = logReader.lastExitCode(taskName: task.name)
-        let statusDot: String
-        if !task.enabled {
-            statusDot = "◌"  // disabled
-        } else if let exit = lastExit {
-            statusDot = exit == 0 ? "🟢" : "🔴"
-        } else {
-            statusDot = "⚪"  // never run
-        }
+        let running = logReader.isRunning(taskName: task.name)
 
-        let titleItem = NSMenuItem(title: "\(statusDot)  \(task.name)", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: task.name, action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
 
         let nameAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13)
         ]
-        titleItem.attributedTitle = NSAttributedString(string: "\(statusDot)  \(task.name)", attributes: nameAttributes)
+        titleItem.attributedTitle = NSAttributedString(string: task.name, attributes: nameAttributes)
         menu.addItem(titleItem)
 
         // Schedule
@@ -108,6 +105,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleItem.attributedTitle = NSAttributedString(string: "     \(schedule)", attributes: detailAttributes)
         menu.addItem(scheduleItem)
 
+        // Running indicator
+        if running {
+            let runningItem = NSMenuItem(title: "    Running...", action: nil, keyEquivalent: "")
+            runningItem.isEnabled = false
+            let runningAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.systemBlue
+            ]
+            runningItem.attributedTitle = NSAttributedString(string: "     Running...", attributes: runningAttributes)
+            menu.addItem(runningItem)
+        }
+
         // Last run
         if let lastRun = logReader.lastRunTime(taskName: task.name) {
             let lastRunItem = NSMenuItem(title: "    Last: \(lastRun)", action: nil, keyEquivalent: "")
@@ -116,15 +125,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(lastRunItem)
         }
 
-        // Run Now
-        let runItem = NSMenuItem(title: "     Run Now", action: #selector(runTask(_:)), keyEquivalent: "")
+        // Run Now (disabled while already running)
+        let runItem = NSMenuItem(title: "     Run Now", action: running ? nil : #selector(runTask(_:)), keyEquivalent: "")
         runItem.target = self
         runItem.representedObject = task.name
         let actionAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11),
-            .foregroundColor: NSColor.controlAccentColor
+            .foregroundColor: running ? NSColor.tertiaryLabelColor : NSColor.controlAccentColor
         ]
         runItem.attributedTitle = NSAttributedString(string: "     Run Now", attributes: actionAttributes)
+        runItem.isEnabled = !running
         menu.addItem(runItem)
 
         // Enable/disable toggle
@@ -132,7 +142,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let toggleItem = NSMenuItem(title: "     \(toggleTitle)", action: #selector(toggleTask(_:)), keyEquivalent: "")
         toggleItem.target = self
         toggleItem.representedObject = task.name
-        toggleItem.attributedTitle = NSAttributedString(string: "     \(toggleTitle)", attributes: actionAttributes)
+        let toggleAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor.controlAccentColor
+        ]
+        toggleItem.attributedTitle = NSAttributedString(string: "     \(toggleTitle)", attributes: toggleAttributes)
         menu.addItem(toggleItem)
 
         menu.addItem(NSMenuItem.separator())

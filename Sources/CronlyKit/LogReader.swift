@@ -57,4 +57,19 @@ public final class LogReader {
         let runs = runs(taskName: taskName, limit: 1)
         return runs.first?.finishedAt
     }
+
+    /// Check if a task is currently running (has a history entry with no finished_at file)
+    public func isRunning(taskName: String) -> Bool {
+        let historyDir = CronlyPaths.taskLogsDir(name: taskName).appendingPathComponent("history")
+        let fm = FileManager.default
+
+        guard let entries = try? fm.contentsOfDirectory(atPath: historyDir.path) else {
+            return false
+        }
+
+        // Check the most recent entry (sorted descending) for a missing finished_at
+        guard let latest = entries.sorted().last else { return false }
+        let finishedPath = historyDir.appendingPathComponent(latest).appendingPathComponent("finished_at").path
+        return !fm.fileExists(atPath: finishedPath)
+    }
 }
