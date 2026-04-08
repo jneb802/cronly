@@ -85,6 +85,9 @@ public final class LaunchdManager {
         cp "$RUN_DIR/stdout.log" "\(stdoutPath)"
         cp "$RUN_DIR/stderr.log" "\(stderrPath)"
 
+        # Signal the app that a job completed
+        echo "\(task.name) $(date -Iseconds)" > "\(CronlyPaths.lastCompletedFile.path)"
+
         # Prune old runs (keep last 50)
         cd "$HISTORY_DIR" && ls -1t | tail -n +51 | xargs rm -rf 2>/dev/null
 

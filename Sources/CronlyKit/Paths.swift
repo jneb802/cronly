@@ -1,5 +1,9 @@
 import Foundation
 
+public extension Notification.Name {
+    static let cronlyJobCompleted = Notification.Name("cronlyJobCompleted")
+}
+
 public enum CronlyPaths {
     public static let configDir: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -13,6 +17,18 @@ public enum CronlyPaths {
     public static let logsDir: URL = {
         configDir.appendingPathComponent("logs")
     }()
+
+    public static let lastCompletedFile: URL = {
+        configDir.appendingPathComponent("last_completed")
+    }()
+
+    public static let promptsDir: URL = {
+        configDir.appendingPathComponent("prompts")
+    }()
+
+    public static func promptFile(name: String) -> URL {
+        promptsDir.appendingPathComponent("\(name).md")
+    }
 
     public static let launchAgentsDir: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -43,6 +59,7 @@ public enum CronlyPaths {
         let fm = FileManager.default
         try fm.createDirectory(at: configDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: promptsDir, withIntermediateDirectories: true)
         if let taskName {
             try fm.createDirectory(at: taskLogsDir(name: taskName), withIntermediateDirectories: true)
         }

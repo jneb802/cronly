@@ -4,9 +4,11 @@ import CronlyKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var configWatcher: DispatchSourceFileSystemObject?
+    private var completionWatcher: DispatchSourceFileSystemObject?
     private let store = ConfigStore()
     private let launchd = LaunchdManager()
     private let logReader = LogReader()
+    private let windowController = CronlyWindowController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide dock icon
@@ -22,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         rebuildMenu()
         watchConfigFile()
+        watchCompletionFile()
+        reinstallTasksIfNeeded()
     }
 
     // Rebuild menu every time it opens so running state is fresh
@@ -72,6 +76,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(NSMenuItem.separator())
+
+        // Manage
+        let manageItem = NSMenuItem(title: "Manage...", action: #selector(openManageWindow), keyEquivalent: ",")
+        manageItem.target = self
+        menu.addItem(manageItem)
 
         // Quit
         let quitItem = NSMenuItem(title: "Quit Cronly", action: #selector(quit), keyEquivalent: "q")
@@ -189,6 +198,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func openManageWindow() {
+        windowController.showWindow()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -211,6 +224,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         return isoString
+    }
+
+    // MARK: - Task Migration
+
+    private func reinstallTasksIfNeeded() {
+        guard let config = try? store.load() else { return }
+        // Only reinstall if run.sh scripts don't have the completion sentinel yet
+        guard let firstEnabled = config.tasks.first(where: { $0.enabled }) else { return }
+        let runScript = CronlyPaths.taskLogsDir(name: firstEnabled.name).appendingPathComponent("run.sh")
+        guard let contents = try? String(contentsOf: runScript, encoding: .utf8),
+              !contents.contains("last_completed") else { return }
+        for task in config.tasks where task.enabled {
+            try? launchd.install(task: task)
+        }
+    }
+
+    // MARK: - Completion File Watching
+
+    private func watchCompletionFile() {
+        let path = CronlyPaths.lastCompletedFile.path
+        let fm = FileManager.default
+
+        if !fm.fileExists(atPath: path) {
+            fm.createFile(atPath: path, contents: nil)
+        }
+
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .rename, .delete],
+            queue: .main
+        )
+
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(name: .cronlyJobCompleted, object: nil)
+            self.rebuildMenu()
+
+            let flags = source.data
+            if flags.contains(.delete) || flags.contains(.rename) {
+                source.cancel()
+                self.completionWatcher = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.watchCompletionFile()
+                }
+            }
+        }
+
+        source.setCancelHandler {
+            close(fd)
+        }
+
+        source.resume()
+        completionWatcher = source
     }
 
     // MARK: - Config File Watching
